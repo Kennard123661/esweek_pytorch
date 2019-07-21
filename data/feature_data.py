@@ -35,7 +35,7 @@ def _get_features_labels_ids(features, labels, user_ids, idxs):
 def read_feature_file():
     raw_data = loadmat(ESWEEK_FEATURE_FILEPATH)
     data = np.array(raw_data['feature_matrix_norm'], dtype=np.float)
-    features = data[:, :FEATURE_LABEL_IDX]
+    features = data[:, :NUM_FEATURES]
     labels = (data[:, FEATURE_LABEL_IDX:FEATURE_LABEL_IDX+1]).astype(int) - 1
     user_ids = (data[:, FEATURE_USER_ID:FEATURE_USER_ID+1]).astype(int)
     print(np.unique(labels))

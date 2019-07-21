@@ -21,7 +21,7 @@ if __name__ == '__main__':
 
 class FeatureTrainer():
     def __init__(self, checkpoint_name, margin=0.1, cls_loss_weighting=0.5,
-                 max_epoch=200, seed=123, learning_rate=10e-4, lr_stepsize=20,
+                 max_epoch=200, seed=123, learning_rate=10e-4, lr_stepsize=10,
                  lr_decay=0.5):
         checkpoint_dir = os.path.join(base_dir, 'checkpoints')
         if not os.path.exists(checkpoint_dir):
@@ -112,12 +112,14 @@ class FeatureTrainer():
                 triplet_loss_divisor += (i + 1)
             triplet_loss /= triplet_loss_divisor
 
-            anchor_cls_loss = self.classification_loss(anchors, anchor_labels.view(-1))
+            anchor_cls_loss = self.classification_loss(anchor_preds, anchor_labels.view(-1))
             positive_cls_loss = self.classification_loss(positives, positive_labels.view(-1))
             negative_cls_loss = self.classification_loss(negatives, negative_labels.view(-1))
-            cls_loss = (anchor_cls_loss + positive_cls_loss + negative_cls_loss) / 3
+            # cls_loss = (anchor_cls_loss + positive_cls_loss + negative_cls_loss) / 3
+            cls_loss = anchor_cls_loss
 
-            total_loss = self.cls_loss_weighting * cls_loss + (1 - self.cls_loss_weighting) * cls_loss
+            # total_loss = self.cls_loss_weighting * cls_loss + (1 - self.cls_loss_weighting) * cls_loss
+            total_loss = cls_loss
             total_loss.backward()
             self.optimizer.step()
             epoch_loss += total_loss.item()
