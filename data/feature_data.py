@@ -35,7 +35,7 @@ def read_feature_file():
     raw_data = loadmat(ESWEEK_FEATURE_FILEPATH)
     data = np.array(raw_data['feature_matrix_norm'])
     features = data[:, :FEATURE_LABEL_IDX]
-    labels = (data[:, FEATURE_LABEL_IDX:FEATURE_LABEL_IDX+1]).astype(int)
+    labels = (data[:, FEATURE_LABEL_IDX:FEATURE_LABEL_IDX+1]).astype(int) - 1
     user_ids = (data[:, FEATURE_USER_ID:FEATURE_USER_ID+1]).astype(int)
     print(np.unique(labels))
 
@@ -122,6 +122,37 @@ class TrainDataset(data.Dataset):
                anchor_label, positive_label, negative_label
 
 
+def esweek_inference_collate_fn(batch):
+    feats, labels = zip(*list(batch))
+    feats = data.dataloader.default_collate(feats)
+    labels = data.dataloader.default_collate(labels)
+    return feats, labels
+
+
+class InferenceDataset(data.Dataset):
+    def __init__(self, data):
+        assert data in ['train', 'val', 'test']
+        super(InferenceDataset, self).__init__()
+        train, val, test = read_feature_file()
+        if data == 'train':
+            self.data = train
+        elif data == 'val':
+            self.data = val
+        elif data == 'test':
+            self.data = test
+        else:
+            raise NotImplementedError
+        self.features = self.data['features']
+        self.labels = self.data['labels']
+
+    def __len__(self):
+        return len(self.labels)
+
+    def __getitem__(self, idx):
+        idx = idx % len(self.labels)
+        feats = self.features[idx]
+        labels = self.labels[idx]
+        return feats, labels
 
 
 if __name__ == '__main__':
