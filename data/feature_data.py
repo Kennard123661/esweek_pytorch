@@ -1,5 +1,6 @@
 import os
 import sys
+import torch
 
 import numpy as np
 from scipy.io import loadmat
@@ -33,7 +34,7 @@ def _get_features_labels_ids(features, labels, user_ids, idxs):
 
 def read_feature_file():
     raw_data = loadmat(ESWEEK_FEATURE_FILEPATH)
-    data = np.array(raw_data['feature_matrix_norm'])
+    data = np.array(raw_data['feature_matrix_norm'], dtype=np.float)
     features = data[:, :FEATURE_LABEL_IDX]
     labels = (data[:, FEATURE_LABEL_IDX:FEATURE_LABEL_IDX+1]).astype(int) - 1
     user_ids = (data[:, FEATURE_USER_ID:FEATURE_USER_ID+1]).astype(int)
@@ -79,29 +80,31 @@ class TrainDataset(data.Dataset):
         assert hasattr(self, 'data')
         labels, user_ids = self.data['labels'], self.data['ids']
         positive_idxs = list()
+        all_idxs = np.arange(len(labels))
         for i, label in enumerate(tqdm(labels)):
-            same_labels = labels == label
-            different_ids = user_ids != user_ids[i]
-            is_positives = np.bitwise_and(same_labels.reshape(-1), different_ids.reshape(-1))
-            positive_idxs.append(np.where(is_positives))
+            same_labels = np.array(labels == label).reshape(-1)
+            different_ids = np.array(user_ids != user_ids[i]).reshape(-1)
+            is_positives = np.bitwise_and(same_labels.reshape(-1), different_ids.reshape(-1)).reshape(-1)
+            positive_idxs.append(np.array(all_idxs[is_positives]))
 
         # make sure there are no non-zero positive ids
         for positive_idx in positive_idxs:
             assert len(positive_idx) > 0
-        return np.array(positive_idxs, dtype=int)
+        return positive_idxs
 
     def _get_negative_idxs(self):
         labels, user_ids = self.data['labels'], self.data['ids']
         negative_idxs = list()
+        all_idxs = np.arange(len(labels))
         for i, label in enumerate(tqdm(labels)):
-            different_labels = labels == label
-            same_ids = user_ids == user_ids[i]
-            is_negatives = np.bitwise_and(different_labels, same_ids)
-            negative_idxs.append(np.where(is_negatives))
+            different_labels = np.array(labels == label).reshape(-1)
+            same_ids = np.array(user_ids == user_ids[i]).reshape(-1)
+            is_negatives = np.bitwise_and(different_labels, same_ids).reshape(-1)
+            negative_idxs.append(all_idxs[is_negatives])
 
         for negative_idx in negative_idxs:
             assert len(negative_idx) > 0
-        return np.array(negative_idxs, dtype=int)
+        return negative_idxs
 
     def __len__(self):
         return len(self.anchor_idxs)
@@ -109,15 +112,15 @@ class TrainDataset(data.Dataset):
     def __getitem__(self, idx):
         idx = idx % len(self.anchor_idxs)
         positive_idx = np.random.choice(self.positive_idxs[idx], 1)
-        negative_idx = np.random.choice(self.negative_idxs[idx], 1)
+        negative_idx = np.random.choice((self.negative_idxs[idx]).reshape(-1), 1)
 
-        anchor_feature = self.features[idx]
-        positive_feature = self.features[positive_idx]
-        negative_feature = self.features[negative_idx]
+        anchor_feature = torch.from_numpy(self.features[idx]).float()
+        positive_feature = torch.from_numpy(self.features[positive_idx]).float()
+        negative_feature = torch.from_numpy(self.features[negative_idx]).float()
 
-        anchor_label = self.labels[idx]
-        positive_label = self.labels[positive_idx]
-        negative_label = self.labels[negative_idx]
+        anchor_label = torch.from_numpy(self.labels[idx]).long()
+        positive_label = torch.from_numpy(self.labels[positive_idx]).long()
+        negative_label = torch.from_numpy(self.labels[negative_idx]).long()
         return anchor_feature, positive_feature, negative_feature, \
                anchor_label, positive_label, negative_label
 
@@ -150,12 +153,14 @@ class InferenceDataset(data.Dataset):
 
     def __getitem__(self, idx):
         idx = idx % len(self.labels)
-        feats = self.features[idx]
-        labels = self.labels[idx]
+        feats = torch.Tensor(self.features[idx]).float()
+        labels = torch.Tensor(self.labels[idx]).float()
         return feats, labels
 
 
 if __name__ == '__main__':
-    read_feature_file()
+    dataset = TrainDataset()
+    print(np.array(dataset.positive_idxs))
+    print(np.array(dataset.negative_idxs))
 
 

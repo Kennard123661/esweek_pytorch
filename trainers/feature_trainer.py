@@ -68,7 +68,7 @@ class FeatureTrainer():
             self.optim_scheduler.load_state_dict(checkpoint['scheduler'])
             self.epoch = checkpoint['epoch']
 
-    def train(self, train_dataset, val_dataset, batch_size, eval_batchsize, num_workers=-1, save_every=5):
+    def train(self, train_dataset, val_dataset, batch_size, eval_batchsize, num_workers=4, save_every=5):
         assert isinstance(train_dataset, TrainDataset)
         train_dataloader = data.DataLoader(dataset=train_dataset, batch_size=batch_size,
                                            shuffle=True, num_workers=num_workers,
@@ -76,6 +76,7 @@ class FeatureTrainer():
         eval_dataloader = data.DataLoader(dataset=val_dataset, batch_size=eval_batchsize,
                                           shuffle=True, num_workers=num_workers,
                                           collate_fn=esweek_inference_collate_fn)
+        self.num_eval = len(val_dataset)
         while self.epoch < self.max_epoch:
             self.epoch += 1
             self.optim_scheduler.step()
@@ -83,6 +84,7 @@ class FeatureTrainer():
             if self.epoch > 0 and self.epoch % save_every == 0:
                 self.save_checkpoint(self.checkpoint_filepath)
             self.eval_step(eval_dataloader)
+        self.eval_step(eval_dataloader)
 
     def train_step(self, train_dataloader):
         epoch_loss = 0
@@ -92,23 +94,23 @@ class FeatureTrainer():
             anchor_outs = self.model(anchor_feats)
             positive_outs = self.model(positive_feats)
             negative_outs = self.model(negative_feats)
-
-            anchor_intermediates, anchor_preds = anchor_outs[:, :-1], anchor_outs[:, -1].view(-1, 1)
-            positive_intermediates, positive_preds = positive_outs[:, :-1], positive_outs[:, -1].view(-1, 1)
-            negative_intermediates, negative_preds = negative_outs[:, :-1], negative_outs[:, -1].view(-1, 1)
+            anchor_intermediates, anchor_preds = anchor_outs[:-1], anchor_outs[-1]
+            positive_intermediates, positive_preds = positive_outs[:-1], positive_outs[-1]
+            negative_intermediates, negative_preds = negative_outs[:-1], negative_outs[-1]
 
             triplet_loss = 0
-            num_intermediates = anchor_intermediates.size()[1]
-            num_anchors = anchor_intermediates.size()[0]
+            num_intermediates = len(anchor_intermediates)
+            num_anchors = anchor_preds.shape[0]
             triplet_loss_divisor = 0
             for i in range(num_intermediates):
-                anchors = anchor_intermediates[:, i].view(num_anchors, -1)
-                positives = positive_intermediates[:, i].view(num_anchors, -1)
-                negatives = negative_intermediates[:, i].view(num_anchors, -1)
+                anchors = anchor_intermediates[i].view(num_anchors, -1)
+                positives = positive_intermediates[i].view(num_anchors, -1)
+                negatives = negative_intermediates[i].view(num_anchors, -1)
                 normalized_margin_loss = self.normalized_triplet_margin_loss(anchors, positives, negatives) * (i + 1)
                 normalized_margin_loss = torch.clamp(normalized_margin_loss, min=0.0)
+                triplet_loss += normalized_margin_loss
                 triplet_loss_divisor += (i + 1)
-                triplet_loss /= triplet_loss_divisor
+            triplet_loss /= triplet_loss_divisor
 
             anchor_cls_loss = self.classification_loss(anchors, anchor_labels.view(-1))
             positive_cls_loss = self.classification_loss(positives, positive_labels.view(-1))
@@ -119,22 +121,22 @@ class FeatureTrainer():
             total_loss.backward()
             self.optimizer.step()
             epoch_loss += total_loss.item()
-        print("epoch {0}, loss: {1}".format(self.epoch, epoch_loss))
+        # print("epoch {0}, loss: {1}".format(self.epoch, epoch_loss))
 
     def eval_step(self, eval_dataloader):
         self.model.eval()
         accuracy = 0
         for (feats, labels) in eval_dataloader:
-            predictions = self.model(feats)
-            predictions == torch.argmax(predictions, dim=1)
+            predictions = self.model(feats)[-1]
+            predictions = torch.argmax(predictions, dim=1)
 
             predictions = np.array(predictions.view(-1).detach().tolist())
             labels = np.array(labels.view(-1).tolist())
             is_correct = np.equal(predictions, labels).astype(int)
             num_correct = np.sum(is_correct)
             accuracy += num_correct
-        accuracy /= len(eval_dataloader)
-        print("The accuracy is {}".format(accuracy))
+        accuracy /= self.num_eval
+        print("epoch {0}... The accuracy is {1}".format(self.epoch, accuracy))
 
     def normalized_triplet_margin_loss(self, anchors, positives, negatives):
         normed_anchors = F.normalize(anchors)
